@@ -1,0 +1,217 @@
+---
+title: "Homework_2"
+author: "Anthony Stachowski"
+date: "9/15/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Problem 1:
+
+Find the latitude and longitude for all of the addresses in the attached file.
+
+Set variables for Geocoding using Google API:
+```{r, warning = FALSE}
+library(dplyr)
+library(httr)
+library(rvest)
+
+address_url = "https://raw.githubusercontent.com/AS-72/R_Data/master/addresses.csv"
+
+addresses = read.delim(address_url, header = TRUE, sep = ",")
+addresses$location = paste(addresses$address, addresses$city, addresses$state, addresses$ZIP_code, sep = ",")
+
+#input Google API key below
+#keyGoogle = 
+
+batch_endpoint = "https://maps.googleapis.com/maps/api/geocode/json?"
+
+addressLookUp = gsub("\\s+", "\\+", addresses$location) # Just replaces the spaces with plus signs
+
+```
+
+Run loop to access the location information by address and combine into data frame:
+```{r}
+
+datalist = list()
+
+for(i in 1:nrow(addresses)){
+  Sys.sleep(0.5)
+  completeRequest <- paste(batch_endpoint,
+                         "address=", addressLookUp[i],
+                         "&key=", keyGoogle, sep = "")
+  locationInfo = GET(completeRequest)
+  requestText = content(locationInfo, as = "text")
+  requestFormat = jsonlite::fromJSON(requestText, simplifyDataFrame = TRUE)
+  data = requestFormat$results$geometry$location
+  data$location = addresses$location[i]
+  datalist[[i]] = data
+  
+}
+
+locationInfo = do.call(rbind, datalist)
+```
+
+Merge locationInfo and addresses based on unique address information:
+```{r}
+
+locationInfoUniq = unique(locationInfo)
+
+locationAddresses = merge(addresses, locationInfoUniq, by = "location")
+locationAddresses
+
+```
+
+
+### Problem 2
+
+Produce a map (static or interactive) and plot all of the addresses. Pick an additional variable to map into your visualization (e.g., color the points by sale_price). Is there anything to be learned?
+
+Get static map for visualization:
+```{r}
+library(ggplot2)
+library(ggmap)
+
+register_google(key = keyGoogle)
+southBendMap = get_map(location = "south Bend, IN", zoom = 10, maptype = "terrain", source = "google")
+```
+
+Build Map with Locations Marked:
+```{r}
+ggmap(southBendMap) +
+  geom_point(data = locationAddresses,
+             aes(x = lng, y = lat, color = sale_price)) +
+  scale_color_gradient(low = "deepskyblue1", high = "blue4")
+```
+
+Based on this map, it looks like houses that sold for more money are generally North of South Bend. Also, it looks like values generally increase as you move away from South Bend's downtown area (there are some exceptions to this, but these seem closer to Notre Dame's campus); these value patterns seem to exhibit a ring effect around downtown with the exception of the area around the campus of Notre Dame.
+
+### Problem 3
+
+Choose any local hospital or the St. Joseph County Sheriff's office. Find the distance between your choice of hospital/Sheriff's office and every address. Is there any relationship between this distance and sale price? Is there anything else you think might be able to explain sale price?
+
+Find geolocation information for St. Joseph Medical Center in Mishawaka:
+```{r}
+
+stJoeMed = "5215 Holy Cross Pkwy, Mishawaka, IN 46545"
+hospitalLookUp = gsub("\\s+", "\\+", stJoeMed)
+
+hospitalRequest <- paste(batch_endpoint,
+                         "address=", hospitalLookUp,
+                         "&key=", keyGoogle, sep = "")
+locationHospital = GET(hospitalRequest)
+reqText = content(locationHospital, as = "text")
+reqFormat = jsonlite::fromJSON(reqText, simplifyDataFrame = TRUE)
+hospitalLocation = reqFormat$results$geometry$location
+
+```
+
+Establish variables for distance call to Google's API:
+```{r}
+
+distance_endpoint = "https://maps.googleapis.com/maps/api/distancematrix/json?units=imperial"
+origin = paste(hospitalLocation$lat, hospitalLocation$lng, sep = ",")
+
+destination = paste(locationAddresses$lat, locationAddresses$lng, sep = ",")
+
+```
+
+Call to API to determine driving distance from St. Joseph Medical Center to each of the 250 addresses:
+```{r}
+
+distanceList = list()
+destinationList = list()
+
+for(i in 1:length(destination)){
+  Sys.sleep(0.5)
+  distanceRequest <- paste(distance_endpoint,
+                         "&origins=", origin,
+                         "&destinations=", destination[i],
+                         "&key=", keyGoogle, sep = "")
+  distanceInfo = GET(distanceRequest)
+  distanceText = content(distanceInfo, as = "text")
+  distanceFormat = jsonlite::fromJSON(distanceText, simplifyDataFrame = TRUE)
+  distanceData = distanceFormat$rows$elements
+  distanceList[[i]] = distanceData
+  destinationList[[i]] = destination[i]
+  
+}
+
+distanceDF = data.frame(matrix(unlist(distanceList), nrow=length(distanceList), byrow=TRUE))
+destinationDF = data.frame(matrix(unlist(destinationList), nrow=length(destinationList), byrow=TRUE))
+
+```
+
+Applying some data cleaning to get everything in a usable format for analysis:
+```{r}
+library(tidyr)
+
+distanceDetails = separate(distanceDF, X1, c("distance_mi", "character"),"\\s+")
+distanceDetails = separate(distanceDetails, X3, c("time_mins", "character1"),"\\s+")
+destinationDetails = separate(destinationDF, matrix.unlist.destinationList...nrow...length.destinationList..., c("lat","lng"),",")
+
+distanceStJoe = cbind(destinationDetails, distanceDetails)
+distanceStJoe = distanceStJoe %>%
+                  select(lng, lat, distance_mi, time_mins)
+
+locationAddressesFinal = merge(locationAddresses, distanceStJoe, by = c("lng","lat"))
+locationAddressesFinal$distance_mi = as.numeric(locationAddressesFinal$distance_mi)
+locationAddressesFinal$time_mins = as.numeric(locationAddressesFinal$time_mins)
+
+locationAddressesFinal
+
+```
+
+Visualizing distance of address to St Joseph Medical Center and Sale Price:
+```{r}
+
+distSalePrice = ggplot(locationAddressesFinal, aes(x=distance_mi, y=sale_price)) +
+                      geom_point(color="blue4") +
+                      geom_smooth(method = "lm", span = 0.5, color = "deepskyblue1") +
+                      theme_set(theme_bw(base_size = 22) ) +
+                      theme(panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      panel.border = element_blank(),
+                      panel.background = element_blank()) +
+                      labs(x = "Distance (miles)", 
+                           y = "Sale Price",
+                           title = "Distance from St. Joseph Medical Center and Sale Price")
+distSalePrice
+
+travelTimeSalePrice = ggplot(locationAddressesFinal, aes(x=time_mins, y=sale_price)) +
+                      geom_point(color="blue4") +
+                      geom_smooth(method = "lm", span = 0.5, color = "deepskyblue1") +
+                      theme_set(theme_bw(base_size = 22) ) +
+                      theme(panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      panel.border = element_blank(),
+                      panel.background = element_blank()) +
+                      labs(x = "Travel Time (mins)", 
+                           y = "Sale Price",
+                           title = "Travel Time from St. Joseph Medical Center and Sale Price")
+
+travelTimeSalePrice
+```
+
+It does not look like distance both in miles or driving time have much effect on sale price. There looks like there might be a slight growth in sale price as the distance and time from St. Joseph Medical Center decreases. A number of other variables may be a better indicator of sale price of the house like acreage, number of bedrooms, number of bathrooms, square footage, and school district just to name a few.
+
+```{r}
+bedroomsSalePrice = ggplot(locationAddressesFinal, aes(x=as.factor(bedrooms), y=sale_price)) +
+                      geom_boxplot(aes(fill = as.factor(bedrooms))) +
+                      theme_set(theme_bw(base_size = 22) ) +
+                      theme(panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      panel.border = element_blank(),
+                      panel.background = element_blank(),
+                      legend.position = "none") +
+                      labs(x = "Number of Bedrooms", 
+                           y = "Sale Price",
+                           title = "Number of Bedrooms and Sale Price")
+
+bedroomsSalePrice
+```
+
+AS can be seen from this boxplot, as the number of bedrooms increase there is a generally an increase in sales price.

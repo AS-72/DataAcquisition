@@ -1,0 +1,84 @@
+---
+title: "Hackathon Data Acquisition"
+author: "Anthony Stachowski"
+date: "9/29/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Ticker Symbols for S&P 500
+
+```{r}
+library(rvest)
+library(magrittr)
+
+wikiURL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+
+sp500Table <- read_html(wikiURL) %>% 
+  html_table(fill = TRUE) %>% 
+  magrittr::extract2(1)
+
+```
+
+## Highest Paid CEOs
+
+```{r}
+library(httr)
+library(purrr)
+library(RSelenium)
+library(wdman)
+
+rd = rsDriver(browser = c("firefox"),
+              port = 4589L)
+
+driver = rd$client
+
+driver$navigate("https://www.equilar.com/reports/table-equilar-200-new-york-times-highest-paid-ceos-2019.html")
+
+elements = driver$findElements(using = "css selector", "table")
+
+ceoTable = read_html(driver$getPageSource()[[1]]) %>% 
+  html_table()
+```
+
+### Adjust Table
+```{r}
+library(dplyr)
+
+ceoAdj = flatten(ceoTable)
+ceoName = data.frame(ceoAdj$`CHIEF EXECUTIVE`)
+```
+
+### Strip out Ticker From CEO Name
+```{r}
+library(stringr)
+
+
+ceoTable = ceoName %>%
+  mutate(ticker = str_extract(ceoAdj..CHIEF.EXECUTIVE.,"\\(.*\\)")) %>%
+  mutate(ticker = gsub("\\(","",ticker)) %>%
+  mutate(ticker = gsub("\\)","",ticker))
+
+```
+
+## Combine S&P 500 and CEO Information
+```{r}
+companyInfo = merge(sp500Table, ceoTable, by.x = "Symbol", by.y = "ticker", all = FALSE)
+
+companyInfo = companyInfo %>%
+  rename(CEO = ceoAdj..CHIEF.EXECUTIVE.) %>%
+  mutate(CEO = gsub("\\(.*\\)","",CEO))
+```
+
+### Most Represented Sector
+```{r}
+
+companyInfo$`GICS Sector` = as.factor(companyInfo$`GICS Sector`)
+
+summary(companyInfo$`GICS Sector`)
+
+```
+Health Care (27) is the sector with the most CEOs who are on the highest paid list, closely followed by Information and Technology companies (26).

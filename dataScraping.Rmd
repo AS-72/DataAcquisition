@@ -1,0 +1,112 @@
+---
+title: "Homework 3"
+author: "Anthony Stachowski"
+date: "9/18/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Assignment 3
+
+The NBA has been interesting lately. Use the following page as a jumping point:
+
+https://www.espn.com/nba/schedule/_/date/20200910
+
+This page contains links with a gameID -- you will need those. Take those gameID values and scrape the play-by-play tables for each of the games on that main page. 
+
+The ideal return is going to be each game having a complete data frame.
+
+
+#### Assemble a list of links for the games on the above page:
+```{r}
+
+library(rvest)
+library(magrittr)
+
+espnLink = "https://www.espn.com/nba/schedule/_/date/20200910"
+
+nbaLinks = read_html(espnLink) %>% 
+  html_nodes("a[href*='nba/game?gameId=']") %>% 
+  html_attr("href")  %>% 
+  unique() %>% 
+  paste("https://www.espn.com", ., sep = "")
+
+```
+
+#### Assemble a list of play-by-play links:
+```{r}
+
+pbpLinks = lapply(nbaLinks, function(link) {
+  read_html(link) %>%
+  html_nodes("a[href*='/nba/playbyplay?gameId=']") %>%
+  html_attr("href") %>%
+  unique() %>%
+  paste("https://www.espn.com", ., sep = "")
+})
+
+```
+
+#### Get play-by-play details by game:
+```{r}
+
+for(i in 1:length(pbpLinks)){
+  
+  Sys.sleep(sample(1:10, 1))
+  dataList = list()
+  
+  pbpRead = read_html(pbpLinks[[i]])
+  
+  pbpBoxScore = pbpRead %>%
+    html_table(fill = TRUE) %>%
+    '[['(1)
+  
+  name = paste(pbpBoxScore[1,1],
+               "_",
+               pbpBoxScore[1,length(pbpBoxScore)],
+               "-",
+               pbpBoxScore[2,1],
+               "_",
+               pbpBoxScore[2,length(pbpBoxScore)],
+               sep = "")
+  
+  for(t in 2:(ncol(pbpBoxScore)-1)){
+    Sys.sleep(sample(1:5, 1))
+    pbpQuarter = pbpRead %>%
+      html_table(fill = TRUE) %>%
+      '[['(t)
+    pbpQuarter$quarter = t-1
+    dataList[[t]] = pbpQuarter
+  }
+  
+  assign(name, do.call(rbind, dataList))
+}
+
+```
+
+#### View Data Frames:
+```{r}
+# View LAL at DEN play-by-play from September 10th:
+`LAL_110-HOU_100`
+
+# View DEN at LAC play-by-play from September 11th:
+`DEN_111-LAC_105`
+
+# View BOS at TOR play-by-play from September 11th:
+`BOS_92-TOR_87`
+
+# View HOU at LAL play-by-play from September 12th:
+`HOU_96-LAL_119`
+
+# View LAC at DEN play-by-play from September 13th:
+`LAC_98-DEN_111`
+
+# View MIA at BOS play-by-play from September 15th:
+`MIA_117-BOS_114`
+
+# View DEN at LAC play-by-play from September 15th:
+`DEN_104-LAC_89`
+```
+

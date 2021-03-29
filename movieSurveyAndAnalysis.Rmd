@@ -1,0 +1,493 @@
+---
+title: "Movies etc."
+author: "Anthony Stachowski"
+date: "10/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+## Movie etc. Survey:
+
+I aimed to design a survey that would be employed in Qualtrics. The survey was designed to be simple, but also collect information that I thought it might be fun to build some additional data around using principles from the course.
+
+The survey has three major sections:
+
+1) Movies
+2) Actors
+3) Genres
+
+Here are the questions with some additional details around answer formatting and conditional logic:
+
+#### Movies:
+
+1) Currently, what is your favorite movie?\
+[Text Response]\
+
+2) How many times have you seen this movie?\
+[Free Number Response]\
+
+3) Did you have a different favorite movie as a child from the movie you just cited?\
+* Yes
+* No
+
+[If yes, then the following question should display]\
+4) What was this movie?\
+[Text Response]\
+
+#### Actors:
+
+1) Who is your favorite movie star?\
+[Text Response]\
+
+2) Are there any movies they act in that you do not like?\
+* Yes
+* No
+
+[If yes, then the following question should display]\
+3) Please provide the movie you least like them in:\
+[Text Response]\
+
+4) Who is or was your biggest movie star crush?\
+[Text Response]\
+
+#### Genres:
+
+1) What is your favorite movie genre?\
+[Text Response]\
+
+2) Which of the following is your least favorite genre?\
+* Action
+* Adventure
+* Comedy
+* Crime
+* Drama
+* Fantasy
+* Horror
+* Mystery
+* Romance
+* Thriller
+
+3) What genre do you enjoy that your friends would be most surprised by?\
+[Text Response]\
+
+
+## Accessing Survey Responses:
+
+As mentioned above, the survey was designed to be deployed in Qualtrics. This survey was distributed to the members within the Fall 2020 Data Acquisition Course. Each member was sent a user-specific link and I explained that the information would neither be anonymous nor confidential. My first objective was to collect responses from each member. The survey did not require answers to every question and therefore I know there will likely be instances where not every question will have a response.
+
+The survey was distributed on September 11, 2020 at 11:29am EST. The following code will bring the results from the survey into R:
+
+```{r Access Survey Information}
+library(qualtricsR)
+
+#Data below has been removed for security
+token = 
+data_center = 
+survey_ID =
+
+surveyResponse = importQualtricsDataV3(token = token,
+                      dataCenter = data_center,
+                      surveyID = survey_ID)
+
+tail(surveyResponse)
+```
+## Cleaning Data:
+
+Now that I have the survey responses, I will do a little cleaning to retain needed information and clean response issues. All of these changes are based on reviewing the data within `surveyResponseAdj`:
+
+```{r Data Cleaning}
+
+library(dplyr)
+library(stringr)
+
+#Select valid responses for the survey:
+surveyResponseAdj = surveyResponse %>%
+  filter(surveyResponse$DistributionChannel == "email")
+
+#Alter some of the data items based on reviewing input:
+surveyResponseAdj$currFavMovie = plyr::revalue(surveyResponseAdj$currFavMovie,
+                                         c("he Pursuit of Happyness" = "Pursuit of Happyness",
+                                           "Act of valor" = "Act of Valor"))
+
+surveyResponseAdj$childFavMovie = plyr::revalue(surveyResponseAdj$childFavMovie,
+                                          c("Lion King" = "The Lion King"))
+
+surveyResponseAdj$favActor = plyr::revalue(surveyResponseAdj$favActor,
+                                     c("Leo DiCaprio" = "Leonardo Di Caprio",
+                                       "Leonardo DiCaprio" = "Leonardo Di Caprio",
+                                       "None" = ""))
+
+surveyResponseAdj$actorCrush = plyr::revalue(surveyResponseAdj$actorCrush,
+                                       c("GongLi"= "Gong Li",
+                                       "Denzel Hayes Washington Jr." = "Denzel Washington",
+                                       "Scarlett Johansson " = "Scarlett Johansson",
+                                       "N/A" = ""))
+
+surveyResponseAdj$favGenre = plyr::revalue(surveyResponseAdj$favGenre,
+                                     c("horror" = "Horror",
+                                       "Action Movies" = "Action"))
+
+surveyResponseAdj$surpriseGenreAdj = gsub("I don't really have friends, but most people are always surprised that people enjoy horror.",
+                                       "Horror",
+                                       surveyResponseAdj$surpriseGenre)
+
+#Select useful columns:
+surveyResponseAdj = surveyResponseAdj %>%
+  select(-Status, -ExternalReference, -Q_BallotBoxStuffing, -`favGenre - Topics`, -`favGenre - Parent Topics`)
+
+```
+
+
+## Find geolocation of IP Address and place on interactive map:
+
+Qualtrics provides some information about the latitude and longitude of the user completing the survey. It is also possible to gather information about the user's location from the IP Address. I will use the API from `ipstack.com` to bring in geolocation information from the IP Address. Depending on how the nature of the IP Address and the routing of the connection, this location could be different from the actual location of the person.
+
+Here is the call to the API to bring back information:
+
+```{r Location based on IP Address}
+library(httr)
+
+#Data below has been removed for security
+ipstack_key = 
+base_url = "http://api.ipstack.com/"
+
+ipAddress = as.list(surveyResponseAdj$IPAddress)
+
+request = paste(base_url,
+                ipAddress,
+                "?access_key=",
+                ipstack_key,
+                sep = "")
+
+datalist1 = list()
+datalist2 = list()
+
+for(i in 1:length(request)){
+  Sys.sleep(0.5)
+  locationInfo = GET(request[i])
+  requestText = content(locationInfo, as = "text")
+  requestFormat = jsonlite::fromJSON(requestText, simplifyDataFrame = TRUE)
+  data1 = requestFormat$latitude
+  data2 = requestFormat$longitude
+  data1$ipAddress = surveyResponseAdj$IPAddress[i]
+  data2$ipAddress = surveyResponseAdj$IPAddress[i]
+  datalist1[[i]] = data1
+  datalist2[[i]] = data2
+  
+}
+
+locationInfo1 = do.call(rbind.data.frame, datalist1)
+locationInfo2 = do.call(rbind.data.frame, datalist2)
+```
+
+Taking these data frames and merging with my survey responses:
+
+```{r Merge IP Location with Survey Response}
+
+surveyResponseAdj = merge(surveyResponseAdj, locationInfo1, by.x = "IPAddress", by.y = "ipAddress")
+surveyResponseAdj = merge(surveyResponseAdj, locationInfo2, by.x = "IPAddress", by.y = "ipAddress")
+
+surveyResponseAdj = dplyr::rename(surveyResponseAdj, "ip_latitude" = "c.41.1535110473633..41.7043113708496..41.7137107849121..41.6933784484863..")
+surveyResponseAdj = dplyr::rename(surveyResponseAdj, "ip_longitude" = "c..83.0784378051758...86.2477874755859...86.2289123535156...86.2461090087891..")
+```
+
+Building a map based on geolocation information returned from the IP Address:
+
+```{r Mapping IP Addresses}
+
+library(rgdal)
+library(ggplot2)
+library(leaflet)
+# set factors to false
+options(stringsAsFactors = FALSE)
+
+ipAddressMap = leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(lng = surveyResponseAdj$ip_longitude, 
+                   lat = surveyResponseAdj$ip_latitude, 
+                   popup = paste(paste(surveyResponseAdj$RecipientFirstName, surveyResponseAdj$RecipientLastName,sep = " "),
+                                 paste("Favorite Movie: ", surveyResponseAdj$currFavMovie, sep = ""),
+                                 paste("Favorite Actor: ", surveyResponseAdj$favActor, sep= ""),
+                                 paste("Favorite Genre: ", surveyResponseAdj$favGenre, sep = ""),
+                                 sep = "; ")
+                    )
+
+ipAddressMap
+  
+```
+
+Building a map based on Survey Location from Qualtrics:
+
+```{r}
+surveyAddressMap = leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(lng = surveyResponseAdj$LocationLongitude, 
+                   lat = surveyResponseAdj$LocationLatitude, 
+                   popup = paste(paste(surveyResponseAdj$RecipientFirstName, surveyResponseAdj$RecipientLastName,sep = " "),
+                                 paste("Favorite Movie: ", surveyResponseAdj$currFavMovie, sep = ""),
+                                 paste("Favorite Actor: ", surveyResponseAdj$favActor, sep= ""),
+                                 paste("Favorite Genre: ", surveyResponseAdj$favGenre, sep = ""),
+                                 sep = "; ")
+                    )
+
+surveyAddressMap
+  
+```
+
+Based on these two maps, you can see that there are differences in the location information provided by both sources! Either way, I think it is a little scary!!
+
+## Scrape Data from Rotten Tomatoes
+
+Now obviously Rotten Tomatoes is the authority on movies and actors, so I will use them to gather some information on movies and actors collected from the survey.
+
+Create lookups based on information from survey:
+```{r Initiate Lookups}
+
+movie_url = "https://www.rottentomatoes.com/m/"
+actor_url = "https://www.rottentomatoes.com/celebrity/"
+
+currFavMovie = gsub("\\s", "\\_", surveyResponseAdj$currFavMovie) # Just replaces the spaces with underscores
+childFavMovie = gsub("\\s", "\\_", surveyResponseAdj$childFavMovie)
+celebrityCrush = tolower(gsub("\\s", "\\_", surveyResponseAdj$actorCrush))
+
+currFavMovie = unique(currFavMovie)
+childFavMovie = unique(childFavMovie)
+celebrityCrush = unique(celebrityCrush)
+
+currFavMovie = currFavMovie[!currFavMovie %in% "" == TRUE]
+childFavMovie = childFavMovie[!childFavMovie %in% "" == TRUE]
+celebrityCrush = celebrityCrush[!celebrityCrush %in% "" == TRUE]
+
+currMovieLookup = list()
+
+for(i in 1:length(currFavMovie)){
+  data = paste(movie_url, currFavMovie[[i]], sep = "")
+  currMovieLookup[[i]] = data
+  }
+
+childMovieLookup = list()
+
+for(i in 1:length(childFavMovie)){
+  data = paste(movie_url, childFavMovie[[i]], sep = "")
+  childMovieLookup[[i]] = data
+  }
+
+celebrityCrushLookup = list()
+
+for(i in 1:length(celebrityCrush)){
+  data = paste(actor_url, celebrityCrush[[i]], sep = "")
+  celebrityCrushLookup[[i]] = data
+  }
+
+```
+
+Scrape Current Favorite Movie Data, bringing in the Tomatometer Score, the Audience Score, and the Number of Users who contributed a rating:
+```{r Current Favorite Movie Ratings}
+library(rvest)
+
+currTomatometer = list()
+currAudienceScore = list()
+currUserRatings = list()
+
+for(i in 1:length(currFavMovie)){
+  Sys.sleep(sample(1:10, 1))
+  currMovie = read_html(currMovieLookup[[i]]) 
+
+  tomatometer = currMovie %>% 
+    html_nodes("#tomato_meter_link > span:nth-child(2)") %>%
+    html_text()
+  currTomatometer[[i]] = tomatometer
+  
+  audienceScore = currMovie %>%
+    html_nodes("div.mop-ratings-wrap__half:nth-child(2) > h2:nth-child(1) > a:nth-child(1) > span:nth-child(2)") %>%
+    html_text()
+  currAudienceScore[[i]] = audienceScore
+  
+  userRatings = currMovie %>%
+    html_nodes(".mop-ratings-wrap__review-totals--not-released > strong:nth-child(2)") %>%
+    html_text()
+  currUserRatings[[i]] = userRatings
+}
+
+currentMovie = data.frame("currFavMovie" = c("Departed", "The Shawshank Redemption", "Pulp Fiction", 
+                                             "Interstellar", "Pursuit of Happyness", "Act of Valor", 
+                                             "The Greatest Showman", "Rudy"))
+
+currentMovie = data.table(currentMovie, currTomatometer, currAudienceScore, currUserRatings)
+currentMovie$currUserRatings = gsub("User Ratings: ", "", currentMovie$currUserRatings)
+
+currentMovie
+```
+
+Scrape Childhood Favorite Movie Data, bringing in the Tomatometer Score, the Audience Score, and the Number of Users who contributed a rating:
+```{r Childhood Favorite Movie Ratings}
+
+childTomatometer = list()
+childAudienceScore = list()
+childUserRatings = list()
+
+for(i in 1:length(childFavMovie)){
+  Sys.sleep(sample(1:10, 1))
+  childMovie = read_html(childMovieLookup[[i]]) 
+
+  tomatometer = childMovie %>% 
+    html_nodes("#tomato_meter_link > span:nth-child(2)") %>%
+    html_text()
+  childTomatometer[[i]] = tomatometer
+  
+  audienceScore = childMovie %>%
+    html_nodes("div.mop-ratings-wrap__half:nth-child(2) > h2:nth-child(1) > a:nth-child(1) > span:nth-child(2)") %>%
+    html_text()
+  childAudienceScore[[i]] = audienceScore
+  
+  userRatings = childMovie %>%
+    html_nodes(".mop-ratings-wrap__review-totals--not-released > strong:nth-child(2)") %>%
+    html_text()
+  childUserRatings[[i]] = userRatings
+}
+
+childMovie = data.frame("childFavMovie" = c("Rookie of the Year", "The Smurfs", "Monster Squad", 
+                                            "The Lion King", "Terminator", "Mulan"))
+
+childMovie = data.table(childMovie, childTomatometer, childAudienceScore, childUserRatings)
+childMovie$childUserRatings = gsub("User Ratings: ", "", childMovie$childUserRatings)
+
+childMovie
+```
+
+Now I will use Rotten Tomatoes to get celebrity crush images (or at least the urls):
+```{r Celebrity Crush Images}
+
+celebrityCrushImage = list()
+
+for(i in 1:length(celebrityCrush)){
+  image = read_html(celebrityCrushLookup[[i]]) %>%
+    html_nodes(".celebrity-bio__hero-img") %>%
+    html_attr("data-src")
+  celebrityCrushImage[[i]] = image
+}
+
+celebCrush = data.frame("celebCrush" = c("Margot Robbie", "Scarlett Johansson", "Mila Kunis",
+                                         "Tom Cruise", "Alyson Hannigan", "Gong Li", 
+                                         "Denzel Washington", "Emma Watson", "Angelina Jolie"))
+
+celebCrush = data.table(celebCrush, celebrityCrushImage)
+
+```
+
+
+Finally, cleaning up the Movie Files to make switch to numeric data:
+```{r Cleaning Output}
+
+currentMovie$currTomatometer = gsub("\\%", "", currentMovie$currTomatometer)
+currentMovie$currAudienceScore = gsub("\\%", "", currentMovie$currAudienceScore)
+currentMovie$currUserRatings = gsub("\\,", "", currentMovie$currUserRatings)
+
+currentMovie$currTomatometer = as.numeric(currentMovie$currTomatometer)
+currentMovie$currAudienceScore = as.numeric(currentMovie$currAudienceScore)
+currentMovie$currUserRatings = as.numeric(currentMovie$currUserRatings)
+
+childMovie$childTomatometer = gsub("\\%", "", childMovie$childTomatometer)
+childMovie$childAudienceScore = gsub("\\%", "", childMovie$childAudienceScore)
+childMovie$childUserRatings = gsub("\\,", "", childMovie$childUserRatings)
+
+childMovie$childTomatometer = as.numeric(childMovie$childTomatometer)
+childMovie$childAudienceScore = as.numeric(childMovie$childAudienceScore)
+childMovie$childUserRatings = as.numeric(childMovie$childUserRatings)
+
+```
+
+## Build Analysis from Favorite Movie Data:
+
+Now I will build two plots to show some of the data gathered from Rotten Tomatoes in conjunction with the survey:
+
+```{r Plot Current Favorite Movie}
+library(plotly)
+
+currentFavoriteMovie = ggplot(currentMovie, aes(x=currTomatometer, y=currAudienceScore,
+                                                text = paste("Favorite Movie: ", currFavMovie, "\n",
+                                                             "User Ratings: ", currUserRatings, "\n",
+                                                             "Tomatometer (%): ", currTomatometer, "\n",
+                                                             "Audience Rating (%): ", currAudienceScore, "\n",
+                                                             sep = ""))) +
+                          geom_point(aes(color = as.factor(currFavMovie))) +
+                          coord_cartesian(xlim = c(0, 100), ylim = c(0, 100)) +
+                          theme_set(theme_bw(base_size = 15)) +
+                          theme(legend.position = "none") +
+                          labs(x = "Tomatometer (%)",
+                               y = "Audience Score (%)",
+                               title = "Current Favorite Movie: Rotten Tomatoes Perspective")
+
+ggplotly(currentFavoriteMovie, tooltip = "text")
+```
+Well, R., it looks like your favorite movie is the least favorite based both on the Tomatometer and Audience Score. While I certainly enjoyed Act of Valor, I guess not everyone else felt the same way.
+
+```{r Plot Childhood Favorite Movie}
+childhoodFavoriteMovie = ggplot(childMovie, aes(x=childTomatometer, y=childAudienceScore,
+                                                text = paste("Childhood Favorite Movie: ", childFavMovie, "\n",
+                                                             "User Ratings: ", childUserRatings, "\n",
+                                                             "Tomatometer (%): ", childTomatometer, "\n",
+                                                             "Audience Rating (%): ", childAudienceScore, "\n",
+                                                             sep = ""))) +
+                          geom_point(aes(color = as.factor(childFavMovie))) +
+                          coord_cartesian(xlim = c(0, 100), ylim = c(0, 100)) +
+                          theme_set(theme_bw(base_size = 15)) +
+                          theme(legend.position = "none") +
+                          labs(x = "Tomatometer (%)",
+                               y = "Audience Score (%)",
+                               title = "Childhood Favorite Movie: Rotten Tomatoes Perspective")
+
+ggplotly(childhoodFavoriteMovie, tooltip = "text")
+
+```
+
+The Lion King seemed to win the hearts of many people as children! Four out of eleven classmates cited it as their favorite childhood movie. Unfortunately The Smurfs was not nearly as favored, sorry L.! And not to pick on you again R., but favorite childhood movie is the Terminator?  I guess some of us were just born for action! And hey, it has good ratings on Rotten Tomatoes.
+
+## Celebrity Crushes
+
+Alright, how about seeing some pictures from Rotten Tomatoes of our celebrity crushes:
+
+```{r, echo=FALSE}
+
+image1 = celebCrush$celebrityCrushImage[[1]]
+image2 = celebCrush$celebrityCrushImage[[2]]
+image3 = celebCrush$celebrityCrushImage[[3]]
+image4 = celebCrush$celebrityCrushImage[[4]]
+image5 = celebCrush$celebrityCrushImage[[5]]
+image6 = celebCrush$celebrityCrushImage[[6]]
+image7 = celebCrush$celebrityCrushImage[[7]]
+image8 = celebCrush$celebrityCrushImage[[8]]
+image9 = celebCrush$celebrityCrushImage[[9]]
+
+```
+
+
+<center><img src="`r image1`"></center>\
+
+
+<center><img src="`r image2`"></center>\
+
+
+<center><img src="`r image3`"></center>\
+
+
+<center><img src="`r image4`"></center>\
+
+
+<center><img src="`r image5`"></center>\
+
+
+<center><img src="`r image6`"></center>\
+
+
+<center><img src="`r image7`"></center>\
+
+
+<center><img src="`r image8`"></center>\
+
+
+<center><img src="`r image9`"></center>\
+

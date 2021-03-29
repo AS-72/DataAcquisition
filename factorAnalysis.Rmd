@@ -1,0 +1,133 @@
+---
+title: "Homework 1, Question 3"
+author: "Anthony Stachowski"
+date: "9/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Question 3:
+
+Perform a factor analysis for the leadership style that you included in your 
+survey and one other leadership style. Report your factor loadings and what 
+that means for these items. You should also check the reliability of 
+these two measures and report the alpha value. 
+
+```{r load teamPerc}
+library(repmis)
+library(dplyr)
+
+dataURL = "https://github.com/AS-72/R_Data/blob/master/teamPerc.RData?raw=True"
+
+source_data(dataURL)
+
+```
+
+Load additional libraries:
+
+```{r load libraries}
+
+library(psych)
+
+```
+
+Examine data:
+
+```{r viewing aspects of data}
+
+View(teamPerc)
+summary(teamPerc)
+
+```
+
+#### Conduct Factor Analysis:
+
+Columns with headers lvi01 - lvi12 are supposed to capture the responses in relation to a leader's forcefulness.  Columns with headers lvi13 - lvi24 are supposed to capture the responses in relation to a leader's enabling ability.  These are columns 2-25 in the data table.  Therefore, I will isolate these columns and run a factor analysis with two factors (one for forceful and one for enabling).
+
+```{r factor analysis}
+
+testData <- teamPerc[,2:25]
+
+testFA <- fa(r = testData, nfactors = 2, rotate = "none")
+
+testFA
+
+```
+
+#### Parallel Analysis:
+
+Conduct parallel analysis to determine if two factors should actually be used:
+
+```{r parallel analysis}
+psych::fa.parallel(testData)
+```
+
+Use another method to determine how many factors might be needed for the analysis:
+
+```{r assessment of factors, eval = TRUE}
+
+testData %>% 
+  na.omit() %>% 
+  cor() %>% 
+  psych::nfactors()
+
+```
+
+The sample size adjusted BIC achieves a minimum at 8 factors.  This would be a viable option, however, as the survey indicates that the twelve questions in each section should capture one leadership quality, I will stay at two factors.
+
+#### Rotation Analysis
+
+Now, I will conduct an orthogonal and oblique rotation.  The oblique rotation would be best to use if there is likely to be correlation between the factors in the model.  In this case, it is likely that these two leadership qualities (forceful and enabling) are correlated and therefore, oblique rotation will probably work best.
+
+```{r rotation analysis}
+orthRotation <- fa(r = testData, nfactors = 2, rotate = "varimax")
+
+obliqueRotation <- fa(r = testData, nfactors = 2, rotate = "promax")
+
+orthRotation
+
+obliqueRotation
+```
+
+#### Factor Loadings using Oblique Rotation
+
+Here are the factor loadings from the oblique rotation:
+
+```{r factor loadings}
+
+obliqueRotation$loadings
+
+```
+
+Generally items lvi01 - lvi12 show a larger factor loading with factor MR2, which should be capturing forceful behavior of leaders.  There are a few items that have cross-loadings with the second factor (MR1), although these tend to be of smaller magnitude or are negative.  The presence of the negative loadings on MR1 for some of the items from lvi01 - lvi12 likely indicate that a higher score on this item (related to leader's forcefulness) generally leads to a lower score on the other factor (leader's enabling ability).  This does make some logical sense.  Overall, it does appear that items lvi01 - lvi12 are correlated with factor MR2.
+
+Items lvi13 - lvi24 show a larger factor loading with factor MR1, which should be capturing enabling behavior of leaders.  There are a few items that have cross-loadings with the second factor (MR2), although these are of smaller magnitude or are negative.  The presence of the negative loadings on MR2 for some of the items from lvi13 - lvi24 likely indicate that a higher score on this item (related to leader's enabling ability) generally leads to a lower score on the other factor (leader's forcefulness).  This does make some logical sense.  Overall, it does appear that items lvi13 - lvi24 are correlated with factor MR1.
+
+#### Reliability Measure
+
+Examining first for the forceful factor of leadership:
+
+```{r forceful alpha value}
+
+forcefulDat <- teamPerc[,2:13]
+
+psych::alpha(forcefulDat, check.keys = TRUE)
+
+```
+
+Our "std.alpha" value for this is 0.8519496. In most cases anything greater than .7 is acceptable for general purpose use. As our value exceeds this, these items (lvi01-lvi12) provide some information about a leader's forcefulness.
+
+Examining second for the enabling factor of leadership:
+
+```{r enabling alpha value}
+
+enablingDat <- teamPerc[,14:25]
+
+psych::alpha(enablingDat, check.keys = TRUE)
+
+```
+
+Our "std.alpha" value for this is 0.8585702. In most cases anything greater than .7 is acceptable for general purpose use. As our value exceeds this, these items (lvi13-lvi25) provide some information about a leader's enabling ability.
